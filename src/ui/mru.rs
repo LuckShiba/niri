@@ -1353,7 +1353,7 @@ impl Inner {
         };
 
         let Some((_, mapped)) = layout.windows().find(|(_, m)| m.id() == id) else {
-            error!("window in the MRU must be present in the layout");
+            error!("This seriously needs to be higher priority.");
             return;
         };
 
