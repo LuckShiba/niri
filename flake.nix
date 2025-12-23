@@ -5,6 +5,11 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
+    naersk = {
+      url = "github:nix-community/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # NOTE: This is not necessary for end users
     # You can omit it with `inputs.rust-overlay.follows = ""`
     rust-overlay = {
@@ -17,12 +22,14 @@
     {
       self,
       nixpkgs,
+      naersk,
       rust-overlay,
     }:
     let
       niri-package =
         {
           lib,
+          callPackage,
           cairo,
           dbus,
           libGL,
@@ -34,17 +41,20 @@
           pango,
           pipewire,
           pkg-config,
-          rustPlatform,
           systemd,
           wayland,
           installShellFiles,
+          clang,
           withDbus ? true,
           withSystemd ? true,
           withScreencastSupport ? true,
-          withDinit ? false,
+          withDinit ? false
         }:
 
-        rustPlatform.buildRustPackage {
+        let
+          naersk' = callPackage naersk {};
+        in
+        naersk'.buildPackage {
           pname = "niri";
           version = self.shortRev or self.dirtyShortRev or "unknown";
 
@@ -61,24 +71,18 @@
             ];
           };
 
-          postPatch = ''
-            patchShebangs resources/niri-session
-            substituteInPlace resources/niri.service \
-              --replace-fail '/usr/bin' "$out/bin"
-          '';
-
-          cargoLock = {
-            # NOTE: This is only used for Git dependencies
-            allowBuiltinFetchGit = true;
-            lockFile = ./Cargo.lock;
+          overrideMain = old: {
+            postPatch = ''
+              patchShebangs resources/niri-session
+              substituteInPlace resources/niri.service \
+                --replace-fail '/usr/bin' "$out/bin"
+            '';
           };
 
-          strictDeps = true;
-
           nativeBuildInputs = [
-            rustPlatform.bindgenHook
             pkg-config
             installShellFiles
+            clang
           ];
 
           buildInputs =
@@ -99,12 +103,18 @@
             # Also includes libudev
             ++ lib.optional withSystemd systemd;
 
-          buildFeatures =
-            lib.optional withDbus "dbus"
-            ++ lib.optional withDinit "dinit"
-            ++ lib.optional withScreencastSupport "xdp-gnome-screencast"
-            ++ lib.optional withSystemd "systemd";
-          buildNoDefaultFeatures = true;
+          LIBCLANG_PATH = "${clang.cc.lib}/lib";
+
+          cargoBuildOptions = old: old ++ [
+            "--features"
+            (lib.concatStringsSep "," (
+              lib.optional withDbus "dbus"
+              ++ lib.optional withDinit "dinit"
+              ++ lib.optional withScreencastSupport "xdp-gnome-screencast"
+              ++ lib.optional withSystemd "systemd"
+            ))
+            "--no-default-features"
+          ];
 
           # ever since this commit:
           # https://github.com/YaLTeR/niri/commit/771ea1e81557ffe7af9cbdbec161601575b64d81
@@ -115,7 +125,7 @@
             export XDG_RUNTIME_DIR="$(mktemp -d)"
           '';
 
-          checkFlags = [
+          cargoTestOptions = old: old ++ [
             # These tests require the ability to access a "valid EGL Display", but that won't work
             # inside the Nix sandbox
             "--skip=::egl"
@@ -137,18 +147,15 @@
               install -Dm644 resources/niri{.service,-shutdown.target} -t $out/share/systemd/user
             '';
 
-          env = {
-            # Force linking with libEGL and libwayland-client
-            # so they can be discovered by `dlopen()`
-            RUSTFLAGS = toString (
-              map (arg: "-C link-arg=" + arg) [
-                "-Wl,--push-state,--no-as-needed"
-                "-lEGL"
-                "-lwayland-client"
-                "-Wl,--pop-state"
-              ]
-            );
-          };
+          # Force linking with libEGL and libwayland-client
+          RUSTFLAGS = toString (
+            map (arg: "-C link-arg=" + arg) [
+              "-Wl,--push-state,--no-as-needed"
+              "-lEGL"
+              "-lwayland-client"
+              "-Wl,--pop-state"
+            ]
+          );
 
           passthru = {
             providedSessions = [ "niri" ];
@@ -172,8 +179,7 @@
     in
     {
       checks = forAllSystems (system: {
-        # We use the debug build here to save a bit of time
-        inherit (self.packages.${system}) niri-debug;
+        inherit (self.packages.${system}) niri;
       });
 
       devShells = forAllSystems (
@@ -235,27 +241,11 @@
       packages = forAllSystems (
         system:
         let
-          niri = nixpkgsFor.${system}.callPackage niri-package { };
+          pkgs = nixpkgsFor.${system};
+          niri = pkgs.callPackage niri-package { };
         in
         {
           inherit niri;
-
-          # NOTE: This is for development purposes only
-          #
-          # It is primarily to help with quickly iterating on
-          # changes made to the above expression - though it is
-          # also not stripped in order to better debug niri itself
-          niri-debug = niri.overrideAttrs (
-            newAttrs: oldAttrs: {
-              pname = oldAttrs.pname + "-debug";
-
-              cargoBuildType = "debug";
-              cargoCheckType = newAttrs.cargoBuildType;
-
-              dontStrip = true;
-            }
-          );
-
           default = niri;
         }
       );
