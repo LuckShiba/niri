@@ -56,7 +56,8 @@
         in
         naersk'.buildPackage {
           pname = "niri";
-          version = self.shortRev or self.dirtyShortRev or "unknown";
+          # Use a stable version for the deps derivation to enable caching
+          version = "unstable";
 
           src = lib.fileset.toSource {
             root = ./.;
@@ -72,6 +73,12 @@
           };
 
           overrideMain = old: {
+            # Set the actual version here (doesn't affect build and deps caching)
+            version = self.shortRev or self.dirtyShortRev or "unknown";
+
+            # Silence warning since we're intentionally overriding version without src
+            __intentionallyOverridingVersion = true;
+            
             postPatch = ''
               patchShebangs resources/niri-session
               substituteInPlace resources/niri.service \
