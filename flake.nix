@@ -5,10 +5,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-    naersk = {
-      url = "github:nix-community/naersk";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
 
     # NOTE: This is not necessary for end users
     # You can omit it with `inputs.rust-overlay.follows = ""`
@@ -22,11 +19,11 @@
     {
       self,
       nixpkgs,
-      naersk,
+      crane,
       rust-overlay,
     }:
     let
-      niri-package =
+      niri-package = system:
         {
           lib,
           callPackage,
@@ -52,12 +49,9 @@
         }:
 
         let
-          naersk' = callPackage naersk {};
-        in
-        naersk'.buildPackage {
-          pname = "niri";
-          version = self.shortRev or self.dirtyShortRev or "unknown";
-
+          pkgs = nixpkgs.legacyPackages.${system};
+          craneLib = crane.mkLib pkgs;
+          
           src = lib.fileset.toSource {
             root = ./.;
             fileset = lib.fileset.unions [
@@ -71,65 +65,100 @@
             ];
           };
 
-          overrideMain = old: {
-            postPatch = ''
-              patchShebangs resources/niri-session
-              substituteInPlace resources/niri.service \
-                --replace-fail '/usr/bin' "$out/bin"
+          commonArgs = {
+            inherit src;
+            strictDeps = true;
+
+            pname = "niri";
+            version = self.shortRev or self.dirtyShortRev or "unknown";
+
+            nativeBuildInputs = [
+              pkg-config
+              installShellFiles
+              clang
+            ];
+
+            buildInputs =
+              [
+                cairo
+                dbus
+                libGL
+                libdisplay-info
+                libinput
+                seatd
+                libxkbcommon
+                libgbm
+                pango
+                wayland
+              ]
+              ++ lib.optional (withDbus || withScreencastSupport || withSystemd) dbus
+              ++ lib.optional withScreencastSupport pipewire
+              # Also includes libudev
+              ++ lib.optional withSystemd systemd;
+
+            LIBCLANG_PATH = "${clang.cc.lib}/lib";
+
+            cargoExtraArgs = lib.concatStringsSep " " ([
+              "--features"
+              (lib.concatStringsSep "," (
+                lib.optional withDbus "dbus"
+                ++ lib.optional withDinit "dinit"
+                ++ lib.optional withScreencastSupport "xdp-gnome-screencast"
+                ++ lib.optional withSystemd "systemd"
+              ))
+              "--no-default-features"
+            ]);
+
+            # ever since this commit:
+            # https://github.com/YaLTeR/niri/commit/771ea1e81557ffe7af9cbdbec161601575b64d81
+            # niri now runs an actual instance of the real compositor (with a mock backend) during tests
+            # and thus creates a real socket file in the runtime dir.
+            # this is fine for our build, we just need to make sure it has a directory to write to.
+            preCheck = ''
+              export XDG_RUNTIME_DIR="$(mktemp -d)"
             '';
+
+            cargoTestExtraArgs = lib.concatStringsSep " " [
+              # These tests require the ability to access a "valid EGL Display", but that won't work
+              # inside the Nix sandbox
+              "-- --skip=::egl"
+            ];
+
+            # Force linking with libEGL and libwayland-client
+            RUSTFLAGS = toString (
+              map (arg: "-C link-arg=" + arg) [
+                "-Wl,--push-state,--no-as-needed"
+                "-lEGL"
+                "-lwayland-client"
+                "-Wl,--pop-state"
+              ]
+            );
+
+            passthru = {
+              providedSessions = [ "niri" ];
+            };
+
+            meta = {
+              description = "Scrollable-tiling Wayland compositor";
+              homepage = "https://github.com/YaLTeR/niri";
+              license = lib.licenses.gpl3Only;
+              mainProgram = "niri";
+              platforms = lib.platforms.linux;
+            };
           };
 
-          nativeBuildInputs = [
-            pkg-config
-            installShellFiles
-            clang
-          ];
+          # Version is removed so a different commit hash doesn't trigger a deps rebuild
+          cargoArtifacts = craneLib.buildDepsOnly (lib.removeAttrs commonArgs [ "version" ]);
+          
+        in
+        craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
 
-          buildInputs =
-            [
-              cairo
-              dbus
-              libGL
-              libdisplay-info
-              libinput
-              seatd
-              libxkbcommon
-              libgbm
-              pango
-              wayland
-            ]
-            ++ lib.optional (withDbus || withScreencastSupport || withSystemd) dbus
-            ++ lib.optional withScreencastSupport pipewire
-            # Also includes libudev
-            ++ lib.optional withSystemd systemd;
-
-          LIBCLANG_PATH = "${clang.cc.lib}/lib";
-
-          cargoBuildOptions = old: old ++ [
-            "--features"
-            (lib.concatStringsSep "," (
-              lib.optional withDbus "dbus"
-              ++ lib.optional withDinit "dinit"
-              ++ lib.optional withScreencastSupport "xdp-gnome-screencast"
-              ++ lib.optional withSystemd "systemd"
-            ))
-            "--no-default-features"
-          ];
-
-          # ever since this commit:
-          # https://github.com/YaLTeR/niri/commit/771ea1e81557ffe7af9cbdbec161601575b64d81
-          # niri now runs an actual instance of the real compositor (with a mock backend) during tests
-          # and thus creates a real socket file in the runtime dir.
-          # this is fine for our build, we just need to make sure it has a directory to write to.
-          preCheck = ''
-            export XDG_RUNTIME_DIR="$(mktemp -d)"
+          postPatch = ''
+            patchShebangs resources/niri-session
+            substituteInPlace resources/niri.service \
+              --replace-fail '/usr/bin' "$out/bin"
           '';
-
-          cargoTestOptions = old: old ++ [
-            # These tests require the ability to access a "valid EGL Display", but that won't work
-            # inside the Nix sandbox
-            "--skip=::egl"
-          ];
 
           postInstall =
             ''
@@ -146,29 +175,7 @@
               install -Dm755 resources/niri-session $out/bin/niri-session
               install -Dm644 resources/niri{.service,-shutdown.target} -t $out/share/systemd/user
             '';
-
-          # Force linking with libEGL and libwayland-client
-          RUSTFLAGS = toString (
-            map (arg: "-C link-arg=" + arg) [
-              "-Wl,--push-state,--no-as-needed"
-              "-lEGL"
-              "-lwayland-client"
-              "-Wl,--pop-state"
-            ]
-          );
-
-          passthru = {
-            providedSessions = [ "niri" ];
-          };
-
-          meta = {
-            description = "Scrollable-tiling Wayland compositor";
-            homepage = "https://github.com/YaLTeR/niri";
-            license = lib.licenses.gpl3Only;
-            mainProgram = "niri";
-            platforms = lib.platforms.linux;
-          };
-        };
+        });
 
       inherit (nixpkgs) lib;
       # Support all Linux systems that the nixpkgs flake exposes
@@ -242,7 +249,7 @@
         system:
         let
           pkgs = nixpkgsFor.${system};
-          niri = pkgs.callPackage niri-package { };
+          niri = pkgs.callPackage (niri-package system) { };
         in
         {
           inherit niri;
@@ -251,7 +258,7 @@
       );
 
       overlays.default = final: _: {
-        niri = final.callPackage niri-package { };
+        niri = final.callPackage (niri-package final.system) { };
       };
     };
 }
