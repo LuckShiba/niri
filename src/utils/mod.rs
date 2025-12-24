@@ -227,7 +227,7 @@ pub fn make_screenshot_path(config: &Config) -> anyhow::Result<Option<PathBuf>> 
         return Ok(None);
     };
 
-    let format = CString::new(path.clone()).context("path must not contain nul bytes")?;
+    let format = CString::new(path.clone()).context("path must not contain nul bytes!!!!!!!!")?;
 
     let mut buf = [0u8; 2048];
     let mut path;
