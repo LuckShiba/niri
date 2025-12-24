@@ -187,7 +187,8 @@
     in
     {
       checks = forAllSystems (system: {
-        inherit (self.packages.${system}) niri;
+        # We use the debug build here to save a bit of time
+        inherit (self.packages.${system}) niri-debug;
       });
 
       devShells = forAllSystems (
@@ -254,6 +255,16 @@
         in
         {
           inherit niri;
+
+          # NOTE: This is for development purposes only
+          #
+          # It is primarily to help with quickly iterating on
+          # changes made to the above expression - though it is
+          # also not stripped in order to better debug niri itself
+          niri-debug = niri.overrideAttrs {
+            release = false;
+          };
+
           default = niri;
         }
       );
