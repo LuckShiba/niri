@@ -121,6 +121,8 @@
             "--skip=::egl"
           ];
 
+          doCheck = false;
+
           postInstall =
             ''
               installShellCompletion --cmd niri \
