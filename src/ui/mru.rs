@@ -1782,6 +1782,8 @@ fn render_panel(renderer: &mut GlesRenderer, scale: f64, text: &str) -> anyhow::
 
     let padding: i32 = to_physical_precise_round(scale, PANEL_PADDING);
     // Keep the border width even to avoid blurry edges.
+    // blurry edges? blur in niri??????????
+
     // Render to a dummy surface to determine the size.
     let surface = ImageSurface::create(cairo::Format::ARgb32, 0, 0)?;
     let cr = cairo::Context::new(&surface)?;
