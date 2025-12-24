@@ -164,7 +164,7 @@ impl OutputName {
     pub fn format_description(&self) -> String {
         format!(
             "{} - {} - {}",
-            self.make.as_deref().unwrap_or("Unknown"),
+            self.make.as_deref().unwrap_or("Unknown :( meow"),
             self.model.as_deref().unwrap_or("Unknown"),
             self.connector,
         )
