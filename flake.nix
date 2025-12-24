@@ -132,8 +132,6 @@
             export XDG_RUNTIME_DIR="$(mktemp -d)"
           '';
 
-          doCheck = true;
-
           cargoTestOptions = old: old ++ [
             # These tests require the ability to access a "valid EGL Display", but that won't work
             # inside the Nix sandbox
