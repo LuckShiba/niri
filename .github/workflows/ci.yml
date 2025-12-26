@@ -297,6 +297,14 @@ jobs:
         uses: cachix/install-nix-action@v31
         continue-on-error: true
 
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v15
+        continue-on-error: true
+        with:
+          name: niri-test-meow
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          skipPush: ${{ github.event_name == 'pull_request' }}
+
       - run: nix flake check
         continue-on-error: true
 

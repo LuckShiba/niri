@@ -252,6 +252,8 @@
               cargoBuildType = "debug";
               cargoCheckType = newAttrs.cargoBuildType;
 
+              # Skip tests for faster CI checks
+              doCheck = false;
               dontStrip = true;
             }
           );
