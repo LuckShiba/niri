@@ -573,14 +573,15 @@ impl Mapped {
         mut primary_scan_out_output: F,
     ) where
         T: Into<Duration>,
-        F: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
+        F: FnMut(&WlSurface, &SurfaceData, bool) -> Option<Output> + Copy,
     {
         let needs_frame_callback = self.needs_frame_callback;
         self.needs_frame_callback = false;
+        let is_window_cast_target = self.is_window_cast_target();
 
         let should_send = move |surface: &WlSurface, states: &SurfaceData| {
             // Let primary_scan_out_output() run its logic and update internal state.
-            if let Some(output) = primary_scan_out_output(surface, states) {
+            if let Some(output) = primary_scan_out_output(surface, states, is_window_cast_target) {
                 return Some(output);
             }
 
