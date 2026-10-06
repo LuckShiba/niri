@@ -5505,7 +5505,7 @@ impl Niri {
                 output,
                 frame_callback_time,
                 FRAME_CALLBACK_THROTTLE,
-                |_, _| Some(output.clone()),
+                |_, _, _| Some(output.clone()),
             );
         }
 
