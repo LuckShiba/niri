@@ -5181,12 +5181,12 @@ impl Niri {
         let state = self.output_state.get(output).unwrap();
         let sequence = state.frame_callback_sequence;
 
-        let should_send = |surface: &WlSurface, states: &SurfaceData| {
+        let should_send_window = |surface: &WlSurface, states: &SurfaceData, is_dynamic_cast_target: bool| {
             // Do the standard primary scanout output check. For pointer surfaces it deduplicates
             // the frame callbacks across potentially multiple outputs, and for regular windows and
             // layer-shell surfaces it avoids sending frame callbacks to invisible surfaces.
             let current_primary_output = surface_primary_scanout_output(surface, states);
-            if current_primary_output.as_ref() != Some(output) {
+            if current_primary_output.as_ref() != Some(output) && !is_dynamic_cast_target {
                 return None;
             }
 
@@ -5213,6 +5213,9 @@ impl Niri {
                 None
             }
         };
+        let should_send = |surface: &WlSurface, states: &SurfaceData| {
+            should_send_window(surface, states, false)
+        };
 
         let frame_callback_time = get_monotonic_time();
 
@@ -5221,7 +5224,7 @@ impl Niri {
                 output,
                 frame_callback_time,
                 FRAME_CALLBACK_THROTTLE,
-                should_send,
+                should_send_window,
             );
         }
 
@@ -5288,7 +5291,7 @@ impl Niri {
                 output,
                 frame_callback_time,
                 FRAME_CALLBACK_THROTTLE,
-                |_, _| None,
+                |_, _, _| None,
             );
         });
 
