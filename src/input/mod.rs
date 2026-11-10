@@ -20,6 +20,7 @@ use smithay::backend::input::{
     TabletToolTipState, TouchEvent,
 };
 use smithay::backend::libinput::LibinputInputBackend;
+use smithay::desktop::layer_map_for_output;
 use smithay::input::dnd::DnDGrab;
 use smithay::input::keyboard::{keysyms, KeyboardSource, Keysym, Layout, ModifiersState};
 use smithay::input::pointer::{
@@ -40,6 +41,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Transform, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
+use smithay::wayland::shell::wlr_layer::{self, Layer};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardDevice;
 use touch_overview_grab::TouchOverviewGrab;
 
@@ -724,6 +726,62 @@ impl State {
                     // Interaction with the active window, immediately update the active window's
                     // focus timestamp without waiting for a possible pending MRU lock-in delay.
                     this.niri.mru_apply_keyboard_commit();
+
+                    /// Checks whether the key should trigger focus-on-type.
+                    ///
+                    /// This includes non-ASCII-control characters as well as Compose and dead keys.
+                    fn is_typed_keysym(m: Keysym) -> bool {
+                        use keysyms::*;
+
+                        // There are three contiguous ranges of dead keys,
+                        // but there's unrelated stuff in the middle.
+                        #[allow(non_upper_case_globals)] // wat
+                        match m.raw() {
+                            KEY_Multi_key
+                            | KEY_dead_grave..=KEY_dead_currency
+                            | KEY_dead_a..=KEY_dead_greek
+                            | KEY_dead_lowline..=KEY_dead_longsolidusoverlay => true,
+                            _ => m.key_char().is_some_and(|c| !c.is_ascii_control()),
+                        }
+                    }
+
+                    // Handle focus-on-type-in-overview layer rule.
+                    if pressed && this.niri.keyboard_focus.is_overview()
+                        // Only focus if the pressed key typed something.
+                        && modified.is_some_and(is_typed_keysym)
+                    {
+                        // The focus is on the overview, so we know there are no exclusive or
+                        // grabbing layer surfaces.
+                        if let Some(surface) = this.niri.layout.active_output().and_then(|output| {
+                            let layers = layer_map_for_output(output);
+
+                            // The order matches how update_keyboard_focus() generally works.
+                            let overlay = layers.layers_on(Layer::Overlay).rev();
+                            let top = layers.layers_on(Layer::Top).rev();
+                            let surface = overlay.chain(top).find(|surface| {
+                                if surface.cached_state().keyboard_interactivity
+                                    != wlr_layer::KeyboardInteractivity::OnDemand
+                                {
+                                    return false;
+                                }
+
+                                this.niri
+                                    .mapped_layer_surfaces
+                                    .get(surface)
+                                    .is_some_and(|mapped| mapped.rules().focus_on_type_in_overview)
+                            });
+                            surface.cloned()
+                        }) {
+                            this.niri.layer_shell_on_demand_focus = Some(surface);
+
+                            // Update keyboard focus right away so that input_forward() below
+                            // sends the key to this newly focused surface.
+                            //
+                            // In case of track-layout "window", this will also switch to the target
+                            // layout before forwarding the key.
+                            this.update_keyboard_focus();
+                        }
+                    }
                 }
 
                 res

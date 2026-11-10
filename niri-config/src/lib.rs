@@ -2458,6 +2458,7 @@ mod tests {
                     },
                     geometry_corner_radius: None,
                     place_within_backdrop: None,
+                    focus_on_type_in_overview: None,
                     baba_is_float: None,
                     background_effect: BackgroundEffectRule {
                         xray: None,
